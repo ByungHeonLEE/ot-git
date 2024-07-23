@@ -37,6 +37,9 @@ class CommitMessageSuggester:
         Returns:
             str: A suggested commit message.
         """
+        if not diff.strip():
+            return "No changes detected."
+
         prompt = PROMPT_TEMPLATE.format(
             diff=diff,
             commit_types=", ".join(COMMIT_TYPES)

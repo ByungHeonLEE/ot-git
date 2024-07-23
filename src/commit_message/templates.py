@@ -49,10 +49,10 @@ As an AI assistant, your task is to generate a concise and informative commit me
 ```
 
 Please follow these guidelines:
-1. Use the following format: {type}({scope}): {subject}
-2. {type} must be one of the following: {commit_types}
-3. {scope} is optional and represents the module or part of the codebase affected
-4. {subject} should be no greater than 50 characters, in the imperative, present tense
+1. Use the following format: <type>(<scope>): <subject>
+2. <type> must be one of the following: {commit_types}
+3. <scope> is optional and represents the module or part of the codebase affected
+4. <subject> should be no greater than 50 characters, in the imperative, present tense
 5. Add a more detailed explanation in the body, wrapped at 72 characters
 6. Use the body to explain what and why, not how
 7. If applicable, add a footer to reference issues or breaking changes
