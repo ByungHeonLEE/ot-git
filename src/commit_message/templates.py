@@ -27,3 +27,35 @@ class Templates:
         ## Additional Notes
         [Any additional information or context]
         """
+COMMIT_TYPES = [
+    "feat",     # A new feature
+    "fix",      # A bug fix
+    "docs",     # Documentation only changes
+    "style",    # Changes that do not affect the meaning of the code (white-space, formatting, etc)
+    "refactor", # A code change that neither fixes a bug nor adds a feature
+    "perf",     # A code change that improves performance
+    "test",     # Adding missing tests or correcting existing tests
+    "chore",    # Changes to the build process or auxiliary tools and libraries such as documentation generation
+    "revert",   # Reverts a previous commit
+]
+
+COMMIT_TEMPLATE = "{type}({scope}): {subject}\n\n{body}\n\n{footer}"
+
+PROMPT_TEMPLATE = """
+As an AI assistant, your task is to generate a concise and informative commit message based on the following code changes:
+
+```
+{diff}
+```
+
+Please follow these guidelines:
+1. Use the following format: {type}({scope}): {subject}
+2. {type} must be one of the following: {commit_types}
+3. {scope} is optional and represents the module or part of the codebase affected
+4. {subject} should be no greater than 50 characters, in the imperative, present tense
+5. Add a more detailed explanation in the body, wrapped at 72 characters
+6. Use the body to explain what and why, not how
+7. If applicable, add a footer to reference issues or breaking changes
+
+Generate the commit message:
+"""

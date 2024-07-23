@@ -1,85 +1,119 @@
 import os
 import anthropic
-from typing import Optional
+import subprocess
+from typing import Optional, List, Tuple
+from .templates import COMMIT_TYPES, COMMIT_TEMPLATE, PROMPT_TEMPLATE
 
 class CommitMessageSuggester:
     def __init__(self):
         self.client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
-    def suggest_commit_message(self, code: str) -> str:
+    def get_git_diff(self) -> str:
         """
-        Suggest a commit message based on the provided code.
+        Get the git diff of the current changes.
+
+        Returns:
+            str: The git diff output.
+        """
+        try:
+            return subprocess.check_output(['git', 'diff', '--cached']).decode('utf-8')
+        except subprocess.CalledProcessError:
+            print("Error: Unable to get git diff. Make sure you're in a git repository and have staged changes.")
+            return ""
+
+    def suggest_commit_message(self, diff: str) -> str:
+        """
+        Suggest a commit message based on the provided git diff.
 
         Args:
-            code (str): The code changes for which to generate a commit message.
+            diff (str): The git diff for which to generate a commit message.
 
         Returns:
             str: A suggested commit message.
         """
-        prompt = f"""
-        As an AI assistant, your task is to generate a concise and informative commit message based on the following code changes:
-
-        ```
-        {code}
-        ```
-
-        Please follow these guidelines:
-        1. Start with a short (50 characters or less) summary of the changes.
-        2. If necessary, add a more detailed explanation after a blank line.
-        3. Use the imperative mood in the subject line (e.g., "Add feature" not "Added feature").
-        4. Capitalize the subject line.
-        5. Do not end the subject line with a period.
-        6. Wrap the body at 72 characters.
-        7. Use the body to explain what and why, not how.
-
-        Generate the commit message:
-        """
+        prompt = PROMPT_TEMPLATE.format(
+            diff=diff,
+            commit_types=", ".join(COMMIT_TYPES)
+        )
 
         response = self.client.completions.create(
             model="claude-2",
             prompt=prompt,
-            max_tokens_to_sample=300,
+            max_tokens_to_sample=500,
             temperature=0.7,
         )
 
         return response.completion.strip()
 
-    def suggest_from_file(self, file_path: str) -> Optional[str]:
+    def parse_commit_message(self, message: str) -> Tuple[str, str, str, str, str]:
         """
-        Suggest a commit message based on the contents of a file.
+        Parse the generated commit message into its components.
 
         Args:
-            file_path (str): Path to the file containing code changes.
+            message (str): The full commit message.
 
         Returns:
-            Optional[str]: A suggested commit message, or None if the file couldn't be read.
+            Tuple[str, str, str, str, str]: type, scope, subject, body, footer
         """
-        try:
-            with open(file_path, 'r') as file:
-                code = file.read()
-            return self.suggest_commit_message(code)
-        except IOError as e:
-            print(f"Error reading file: {e}")
-            return None
+        lines = message.split('\n')
+        header = lines[0]
+        body = '\n'.join(lines[1:]).strip()
+
+        # Parse header
+        type_scope, subject = header.split(':', 1)
+        if '(' in type_scope:
+            type, scope = type_scope.split('(')
+            scope = scope.rstrip(')')
+        else:
+            type, scope = type_scope, ''
+
+        # Split body and footer
+        if '\n\n' in body:
+            body, footer = body.rsplit('\n\n', 1)
+        else:
+            footer = ''
+
+        return type.strip(), scope.strip(), subject.strip(), body.strip(), footer.strip()
+
+    def format_commit_message(self, type: str, scope: str, subject: str, body: str, footer: str) -> str:
+        """
+        Format the commit message components into the final message.
+
+        Args:
+            type (str): Commit type.
+            scope (str): Commit scope.
+            subject (str): Commit subject.
+            body (str): Commit body.
+            footer (str): Commit footer.
+
+        Returns:
+            str: Formatted commit message.
+        """
+        return COMMIT_TEMPLATE.format(
+            type=type,
+            scope=f"({scope})" if scope else "",
+            subject=subject,
+            body=body,
+            footer=footer
+        )
+
+    def suggest_and_format(self) -> str:
+        """
+        Suggest a commit message based on the current git diff and format it.
+
+        Returns:
+            str: A formatted commit message suggestion.
+        """
+        diff = self.get_git_diff()
+        if not diff:
+            return "No changes detected."
+
+        suggested_message = self.suggest_commit_message(diff)
+        type, scope, subject, body, footer = self.parse_commit_message(suggested_message)
+        return self.format_commit_message(type, scope, subject, body, footer)
 
 if __name__ == "__main__":
     suggester = CommitMessageSuggester()
-    
-    # Example usage with a string
-    code_changes = """
-    def add_numbers(a, b):
-        return a + b
-
-    def multiply_numbers(a, b):
-        return a * b
-    """
-    suggested_message = suggester.suggest_commit_message(code_changes)
+    formatted_message = suggester.suggest_and_format()
     print("Suggested commit message:")
-    print(suggested_message)
-
-    # Example usage with a file
-    file_path = "path/to/your/changed_file.py"
-    suggested_message_from_file = suggester.suggest_from_file(file_path)
-    if suggested_message_from_file:
-        print("\nSuggested commit message from file:")
-        print(suggested_message_from_file)
+    print(formatted_message)
