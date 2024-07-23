@@ -1,12 +1,14 @@
 import os
 import anthropic
-import subprocess
 from typing import Optional, List, Tuple
 from .templates import COMMIT_TYPES, COMMIT_TEMPLATE, PROMPT_TEMPLATE
+from .mock_git_repo import MockGitRepo
 
 class CommitMessageSuggester:
-    def __init__(self):
+    def __init__(self, use_mock=False):
         self.client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        self.use_mock = use_mock
+        self.mock_repo = MockGitRepo() if use_mock else None
 
     def get_git_diff(self) -> str:
         """
@@ -15,11 +17,15 @@ class CommitMessageSuggester:
         Returns:
             str: The git diff output.
         """
-        try:
-            return subprocess.check_output(['git', 'diff', '--cached']).decode('utf-8')
-        except subprocess.CalledProcessError:
-            print("Error: Unable to get git diff. Make sure you're in a git repository and have staged changes.")
-            return ""
+        if self.use_mock:
+            return self.mock_repo.get_diff()
+        else:
+            try:
+                import subprocess
+                return subprocess.check_output(['git', 'diff', '--cached']).decode('utf-8')
+            except subprocess.CalledProcessError:
+                print("Error: Unable to get git diff. Make sure you're in a git repository and have staged changes.")
+                return ""
 
     def suggest_commit_message(self, diff: str) -> str:
         """
@@ -113,7 +119,27 @@ class CommitMessageSuggester:
         return self.format_commit_message(type, scope, subject, body, footer)
 
 if __name__ == "__main__":
+    # Test with real git repository
     suggester = CommitMessageSuggester()
     formatted_message = suggester.suggest_and_format()
-    print("Suggested commit message:")
+    print("Suggested commit message (real git):")
     print(formatted_message)
+
+    # Test with mock git repository
+    mock_suggester = CommitMessageSuggester(use_mock=True)
+    mock_suggester.mock_repo.stage_changes("""
+diff --git a/example.py b/example.py
+index 1234567..abcdefg 100644
+--- a/example.py
++++ b/example.py
+@@ -1,5 +1,5 @@
+ def hello_world():
+-    print("Hello, World!")
++    print("Hello, GitHub!")
+ 
+ if __name__ == "__main__":
+     hello_world()
+""")
+    mock_formatted_message = mock_suggester.suggest_and_format()
+    print("\nSuggested commit message (mock git):")
+    print(mock_formatted_message)
