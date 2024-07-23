@@ -3,7 +3,7 @@
 OTGIT is a commit message suggester that uses AI to generate meaningful commit messages based on your Git diff.
 
 ## Flow Chart
-
+``` mermaid
 flowchart TD
     A[Start] --> B[Set up OTGIT]
     B --> C[Stage Git Changes]
@@ -13,7 +13,7 @@ flowchart TD
     E -->|No| G[Edit Message]
     G --> F
     F --> H[End]
-
+```
 ## Prerequisites
 
 - Docker
