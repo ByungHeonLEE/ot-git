@@ -1,42 +1,26 @@
 import os
 import anthropic
+from dotenv import load_dotenv
 from typing import Optional, List, Tuple
 from .templates import COMMIT_TYPES, COMMIT_TEMPLATE, PROMPT_TEMPLATE
-from .mock_git_repo import MockGitRepo
 
 class CommitMessageSuggester:
-    def __init__(self, use_mock=False):
-        self.client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-        self.use_mock = use_mock
-        self.mock_repo = MockGitRepo() if use_mock else None
+    def __init__(self):
+        load_dotenv()
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY not found in .env file")
+        self.client = anthropic.Anthropic(api_key=api_key)
 
     def get_git_diff(self) -> str:
-        """
-        Get the git diff of the current changes.
-
-        Returns:
-            str: The git diff output.
-        """
-        if self.use_mock:
-            return self.mock_repo.get_diff()
-        else:
-            try:
-                import subprocess
-                return subprocess.check_output(['git', 'diff', '--cached']).decode('utf-8')
-            except subprocess.CalledProcessError:
-                print("Error: Unable to get git diff. Make sure you're in a git repository and have staged changes.")
-                return ""
+        try:
+            import subprocess
+            return subprocess.check_output(['git', 'diff', '--cached']).decode('utf-8')
+        except subprocess.CalledProcessError:
+            print("Error: Unable to get git diff. Make sure you're in a git repository and have staged changes.")
+            return ""
 
     def suggest_commit_message(self, diff: str) -> str:
-        """
-        Suggest a commit message based on the provided git diff.
-
-        Args:
-            diff (str): The git diff for which to generate a commit message.
-
-        Returns:
-            str: A suggested commit message.
-        """
         if not diff.strip():
             return "No changes detected."
 
@@ -45,16 +29,21 @@ class CommitMessageSuggester:
             commit_types=", ".join(COMMIT_TYPES)
         )
 
-        response = self.client.completions.create(
-            model="claude-2",
-            prompt=prompt,
-            max_tokens_to_sample=500,
+        message = self.client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=500,
             temperature=0.7,
+            messages=[
+                {
+                "role": "user",
+                "content": prompt
+                }
+            ]
         )
 
-        return response.completion.strip()
+        return message.content[0].text
 
-    def parse_commit_message(self, message: str) -> Tuple[str, str, str, str, str]:
+    def parse_commit_message(self, message: str) -> Tuple[str, str, str, str]:
         """
         Parse the generated commit message into its components.
 
@@ -62,19 +51,14 @@ class CommitMessageSuggester:
             message (str): The full commit message.
 
         Returns:
-            Tuple[str, str, str, str, str]: type, scope, subject, body, footer
+            Tuple[str, str, str, str]: type, subject, body, footer
         """
         lines = message.split('\n')
         header = lines[0]
         body = '\n'.join(lines[1:]).strip()
 
         # Parse header
-        type_scope, subject = header.split(':', 1)
-        if '(' in type_scope:
-            type, scope = type_scope.split('(')
-            scope = scope.rstrip(')')
-        else:
-            type, scope = type_scope, ''
+        type, subject = header.split(':', 1)
 
         # Split body and footer
         if '\n\n' in body:
@@ -82,15 +66,14 @@ class CommitMessageSuggester:
         else:
             footer = ''
 
-        return type.strip(), scope.strip(), subject.strip(), body.strip(), footer.strip()
+        return type.strip(), subject.strip(), body.strip(), footer.strip()
 
-    def format_commit_message(self, type: str, scope: str, subject: str, body: str, footer: str) -> str:
+    def format_commit_message(self, type: str, subject: str, body: str, footer: str) -> str:
         """
         Format the commit message components into the final message.
 
         Args:
             type (str): Commit type.
-            scope (str): Commit scope.
             subject (str): Commit subject.
             body (str): Commit body.
             footer (str): Commit footer.
@@ -100,49 +83,61 @@ class CommitMessageSuggester:
         """
         return COMMIT_TEMPLATE.format(
             type=type,
-            scope=f"({scope})" if scope else "",
             subject=subject,
             body=body,
             footer=footer
         )
 
-    def suggest_and_format(self) -> str:
+    def summarize_commit_message(self, message: str) -> str:
         """
-        Suggest a commit message based on the current git diff and format it.
+        Summarize the commit message for multiple file changes.
+
+        Args:
+            message (str): The full commit message.
 
         Returns:
-            str: A formatted commit message suggestion.
+            str: A summarized commit message.
         """
-        diff = self.get_git_diff()
+        lines = message.split('\n')
+        main_message = lines[0]
+        
+        # Extract file names from the message
+        file_changes = [line.strip() for line in lines if line.strip().startswith('-') and ':' in line]
+        
+        # Summarize file changes
+        if len(file_changes) > 1:
+            files_summary = f"Update {len(file_changes)} files"
+        elif len(file_changes) == 1:
+            files_summary = file_changes[0].split(':')[0].strip('- ')
+        else:
+            files_summary = "Make changes"
+
+        # Combine main message with files summary
+        summary = f"{main_message} && {files_summary}"
+        
+        # Add up to 3 bullet points of additional info
+        additional_info = [line.strip('- ') for line in lines[1:] if line.strip().startswith('-') and ':' not in line][:3]
+        if additional_info:
+            summary += "\n\n" + "\n".join(f"- {info}" for info in additional_info)
+
+        return summary
+
+    def suggest_and_format(self, diff: str) -> str:
         if not diff:
             return "No changes detected."
 
         suggested_message = self.suggest_commit_message(diff)
-        type, scope, subject, body, footer = self.parse_commit_message(suggested_message)
-        return self.format_commit_message(type, scope, subject, body, footer)
+        summarized_message = self.summarize_commit_message(suggested_message)
+        
+        # Parse the summarized message
+        type, subject, body, footer = self.parse_commit_message(summarized_message)
+        
+        # Format the final message
+        return self.format_commit_message(type, subject, body, footer)
 
 if __name__ == "__main__":
     # Test with real git repository
     suggester = CommitMessageSuggester()
-    formatted_message = suggester.suggest_and_format()
+    formatted_message = suggester.suggest_and_format(suggester.get_git_diff())
     print("Suggested commit message (real git):")
     print(formatted_message)
-
-    # Test with mock git repository
-    mock_suggester = CommitMessageSuggester(use_mock=True)
-    mock_suggester.mock_repo.stage_changes("""
-diff --git a/example.py b/example.py
-index 1234567..abcdefg 100644
---- a/example.py
-+++ b/example.py
-@@ -1,5 +1,5 @@
- def hello_world():
--    print("Hello, World!")
-+    print("Hello, GitHub!")
- 
- if __name__ == "__main__":
-     hello_world()
-""")
-    mock_formatted_message = mock_suggester.suggest_and_format()
-    print("\nSuggested commit message (mock git):")
-    print(mock_formatted_message)
